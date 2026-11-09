@@ -40,8 +40,10 @@ import static org.hisp.dhis.tracker.imports.validation.Users.USER_5;
 import static org.hisp.dhis.tracker.imports.validation.Users.USER_6;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1000;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1102;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1113;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -74,6 +76,7 @@ import org.hisp.dhis.tracker.imports.TrackerImportStrategy;
 import org.hisp.dhis.tracker.imports.domain.TrackerObjects;
 import org.hisp.dhis.tracker.imports.report.ImportReport;
 import org.hisp.dhis.tracker.imports.report.TrackerTypeReport;
+import org.hisp.dhis.tracker.model.Enrollment;
 import org.hisp.dhis.tracker.model.TrackerEvent;
 import org.hisp.dhis.user.User;
 import org.junit.jupiter.api.BeforeAll;
@@ -459,6 +462,74 @@ class EventImportValidationTest extends PostgresIntegrationTestBase {
     ImportReport importReport = trackerImportService.importTracker(params, trackerObjects);
 
     assertHasOnlyErrors(importReport, ValidationCode.E1082);
+  }
+
+  @Test
+  void shouldFailWhenCreatingEventInDeletedEnrollment() throws IOException {
+    deleteTrackerObjects(
+        TrackerObjects.builder()
+            .enrollments(
+                List.of(
+                    org.hisp.dhis.tracker.imports.domain.Enrollment.builder()
+                        .enrollment(UID.of("MNWZ6hnuhSw"))
+                        .build()))
+            .build());
+
+    ImportReport importReport =
+        trackerImportService.importTracker(
+            TrackerImportParams.builder().build(),
+            testSetup.fromJson("tracker/validations/events-with-notes-data.json"));
+
+    assertHasOnlyErrors(importReport, E1113);
+    assertNull(manager.get(TrackerEvent.class, "uLxFbxfYDQE"));
+  }
+
+  @Test
+  void shouldFailWhenCreatingEventInEnrollmentOfDeletedTrackedEntity() throws IOException {
+    deleteTrackerObjects(
+        TrackerObjects.builder()
+            .trackedEntities(
+                List.of(
+                    org.hisp.dhis.tracker.imports.domain.TrackedEntity.builder()
+                        .trackedEntity(UID.of("Kj6vYde4LHh"))
+                        .build()))
+            .build());
+
+    ImportReport importReport =
+        trackerImportService.importTracker(
+            TrackerImportParams.builder().build(),
+            testSetup.fromJson("tracker/validations/events-with-notes-data.json"));
+
+    assertHasOnlyErrors(importReport, E1113);
+    assertNull(manager.get(TrackerEvent.class, "uLxFbxfYDQE"));
+  }
+
+  @Test
+  void shouldDeleteEventLeftNotDeletedInDeletedEnrollment() throws IOException {
+    createEvent("tracker/validations/events-with-notes-data.json");
+    // soft delete only the enrollment, leaving its event not deleted like older versions allowed
+    manager.delete(manager.get(Enrollment.class, "MNWZ6hnuhSw"));
+    clearSession();
+
+    ImportReport importReport =
+        trackerImportService.importTracker(
+            TrackerImportParams.builder().importStrategy(DELETE).build(),
+            TrackerObjects.builder()
+                .events(
+                    List.of(
+                        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder()
+                            .event(UID.of("uLxFbxfYDQE"))
+                            .build()))
+                .build());
+
+    assertNoErrors(importReport);
+    assertEquals(1, importReport.getStats().getDeleted());
+  }
+
+  private void deleteTrackerObjects(TrackerObjects trackerObjects) {
+    TrackerImportParams params = TrackerImportParams.builder().importStrategy(DELETE).build();
+    assertNoErrors(trackerImportService.importTracker(params, trackerObjects));
+    clearSession();
   }
 
   @Test

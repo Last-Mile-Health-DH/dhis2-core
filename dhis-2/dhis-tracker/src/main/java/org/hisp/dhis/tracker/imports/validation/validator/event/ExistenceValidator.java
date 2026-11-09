@@ -32,6 +32,8 @@ package org.hisp.dhis.tracker.imports.validation.validator.event;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1030;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1032;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1082;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1113;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1114;
 
 import org.hisp.dhis.common.SoftDeletableEntity;
 import org.hisp.dhis.tracker.imports.TrackerImportStrategy;
@@ -41,6 +43,7 @@ import org.hisp.dhis.tracker.imports.domain.TrackerEvent;
 import org.hisp.dhis.tracker.imports.preheat.TrackerPreheat;
 import org.hisp.dhis.tracker.imports.validation.Reporter;
 import org.hisp.dhis.tracker.imports.validation.Validator;
+import org.hisp.dhis.tracker.model.Enrollment;
 
 /**
  * @author Morten Svanæs <msvanaes@dhis2.org>
@@ -61,8 +64,39 @@ class ExistenceValidator implements Validator<org.hisp.dhis.tracker.imports.doma
 
     if (existingEvent != null && importStrategy.isCreate()) {
       reporter.addError(event, E1030, event.getEvent());
+      return;
     } else if (existingEvent == null && importStrategy.isUpdateOrDelete()) {
       reporter.addError(event, E1032, event.getEvent());
+      return;
+    }
+
+    if (event instanceof TrackerEvent trackerEvent && !importStrategy.isDelete()) {
+      validateParentIsNotDeleted(reporter, bundle, trackerEvent);
+    }
+  }
+
+  /**
+   * No create or update is allowed on an event whose enrollment or tracked entity is soft deleted.
+   * Deleting is allowed, so that events left in that state by older versions, which are reported by
+   * a data integrity check, can be cleaned up.
+   */
+  private void validateParentIsNotDeleted(
+      Reporter reporter, TrackerBundle bundle, TrackerEvent event) {
+    TrackerPreheat preheat = bundle.getPreheat();
+    org.hisp.dhis.tracker.model.TrackerEvent existingEvent =
+        preheat.getTrackerEvent(event.getEvent());
+    Enrollment enrollment =
+        existingEvent != null
+            ? existingEvent.getEnrollment()
+            : preheat.getEnrollment(event.getEnrollment());
+    if (enrollment == null) {
+      return;
+    }
+
+    if (enrollment.isDeleted()) {
+      reporter.addError(event, E1113, enrollment.getUid());
+    } else if (enrollment.getTrackedEntity() != null && enrollment.getTrackedEntity().isDeleted()) {
+      reporter.addError(event, E1114, enrollment.getTrackedEntity().getUid());
     }
   }
 

@@ -36,6 +36,8 @@ import static org.hisp.dhis.test.utils.Assertions.assertIsEmpty;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4010;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4012;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4014;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4021;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4022;
 import static org.hisp.dhis.tracker.imports.validation.validator.AssertValidations.assertHasError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -53,7 +55,10 @@ import org.hisp.dhis.tracker.imports.domain.Relationship;
 import org.hisp.dhis.tracker.imports.domain.RelationshipItem;
 import org.hisp.dhis.tracker.imports.preheat.TrackerPreheat;
 import org.hisp.dhis.tracker.imports.validation.Reporter;
+import org.hisp.dhis.tracker.model.Enrollment;
+import org.hisp.dhis.tracker.model.SingleEvent;
 import org.hisp.dhis.tracker.model.TrackedEntity;
+import org.hisp.dhis.tracker.model.TrackerEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -297,6 +302,221 @@ class ConstraintValidatorTest {
         relationship,
         E4012,
         "Could not find `event`: `" + relationship.getFrom().getEvent() + "`");
+  }
+
+  @Test
+  void shouldFailWhenLinkingToDeletedTrackedEntity() {
+    RelationshipType relType =
+        createRelTypeConstraint(TRACKED_ENTITY_INSTANCE, TRACKED_ENTITY_INSTANCE);
+    TrackedEntityType trackedEntityType = new TrackedEntityType();
+    relType.getFromConstraint().setTrackedEntityType(trackedEntityType);
+    relType.getToConstraint().setTrackedEntityType(trackedEntityType);
+    TrackedEntity trackedEntity = trackedEntity(true);
+    trackedEntity.setTrackedEntityType(trackedEntityType);
+    UID uid = UID.of(trackedEntity);
+
+    Relationship relationship =
+        Relationship.builder()
+            .relationship(UID.generate())
+            .from(RelationshipItem.builder().trackedEntity(uid).build())
+            .to(RelationshipItem.builder().trackedEntity(uid).build())
+            .relationshipType(MetadataIdentifier.ofUid(relType.getUid()))
+            .build();
+
+    when(preheat.getRelationshipType(relationship.getRelationshipType())).thenReturn(relType);
+    when(preheat.getTrackedEntity(uid)).thenReturn(trackedEntity);
+    when(params.toMetadataIdentifier(trackedEntityType))
+        .thenReturn(MetadataIdentifier.ofUid(trackedEntityType.getUid()));
+    when(preheat.getIdSchemes()).thenReturn(params);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4021,
+        "Relationship cannot link to trackedEntity: `"
+            + uid.getValue()
+            + "` because it is deleted.");
+  }
+
+  @Test
+  void shouldFailWhenLinkingToDeletedEnrollment() {
+    Enrollment enrollment = enrollment(true, trackedEntity(false));
+    Relationship relationship = enrollmentRelationship(enrollment);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4021,
+        "Relationship cannot link to enrollment: `"
+            + enrollment.getUid()
+            + "` because it is deleted.");
+  }
+
+  @Test
+  void shouldFailWhenLinkingToEnrollmentOfDeletedTrackedEntity() {
+    TrackedEntity trackedEntity = trackedEntity(true);
+    Enrollment enrollment = enrollment(false, trackedEntity);
+    Relationship relationship = enrollmentRelationship(enrollment);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4022,
+        "Relationship cannot link to enrollment: `"
+            + enrollment.getUid()
+            + "` because its trackedEntity: `"
+            + trackedEntity.getUid()
+            + "` is deleted.");
+  }
+
+  @Test
+  void shouldPassWhenLinkingToNotDeletedEnrollment() {
+    Relationship relationship = enrollmentRelationship(enrollment(false, trackedEntity(false)));
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertIsEmpty(reporter.getErrors());
+  }
+
+  @Test
+  void shouldFailWhenLinkingToDeletedTrackerEvent() {
+    TrackerEvent event = trackerEvent(true, enrollment(false, trackedEntity(false)));
+    Relationship relationship = eventRelationship(UID.of(event));
+    when(preheat.getTrackerEvent(any())).thenReturn(event);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4021,
+        "Relationship cannot link to event: `" + event.getUid() + "` because it is deleted.");
+  }
+
+  @Test
+  void shouldFailWhenLinkingToDeletedSingleEvent() {
+    SingleEvent event = new SingleEvent();
+    event.setUid(CodeGenerator.generateUid());
+    event.setDeleted(true);
+    Relationship relationship = eventRelationship(UID.of(event));
+    when(preheat.getSingleEvent(any())).thenReturn(event);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4021,
+        "Relationship cannot link to event: `" + event.getUid() + "` because it is deleted.");
+  }
+
+  @Test
+  void shouldFailWhenLinkingToEventInDeletedEnrollment() {
+    Enrollment enrollment = enrollment(true, trackedEntity(false));
+    TrackerEvent event = trackerEvent(false, enrollment);
+    Relationship relationship = eventRelationship(UID.of(event));
+    when(preheat.getTrackerEvent(any())).thenReturn(event);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4022,
+        "Relationship cannot link to event: `"
+            + event.getUid()
+            + "` because its enrollment: `"
+            + enrollment.getUid()
+            + "` is deleted.");
+  }
+
+  @Test
+  void shouldFailWhenLinkingToEventOfDeletedTrackedEntity() {
+    TrackedEntity trackedEntity = trackedEntity(true);
+    TrackerEvent event = trackerEvent(false, enrollment(false, trackedEntity));
+    Relationship relationship = eventRelationship(UID.of(event));
+    when(preheat.getTrackerEvent(any())).thenReturn(event);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertHasError(
+        reporter,
+        relationship,
+        E4022,
+        "Relationship cannot link to event: `"
+            + event.getUid()
+            + "` because its trackedEntity: `"
+            + trackedEntity.getUid()
+            + "` is deleted.");
+  }
+
+  @Test
+  void shouldPassWhenLinkingToNotDeletedTrackerEvent() {
+    TrackerEvent event = trackerEvent(false, enrollment(false, trackedEntity(false)));
+    Relationship relationship = eventRelationship(UID.of(event));
+    when(preheat.getTrackerEvent(any())).thenReturn(event);
+
+    validator.validate(reporter, bundle, relationship);
+
+    assertIsEmpty(reporter.getErrors());
+  }
+
+  private Relationship enrollmentRelationship(Enrollment enrollment) {
+    RelationshipType relType = createRelTypeConstraint(PROGRAM_INSTANCE, PROGRAM_INSTANCE);
+    UID uid = UID.of(enrollment);
+    Relationship relationship =
+        Relationship.builder()
+            .relationship(UID.generate())
+            .from(RelationshipItem.builder().enrollment(uid).build())
+            .to(RelationshipItem.builder().enrollment(uid).build())
+            .relationshipType(MetadataIdentifier.ofUid(relType.getUid()))
+            .build();
+    when(preheat.getRelationshipType(relationship.getRelationshipType())).thenReturn(relType);
+    when(preheat.getEnrollment(uid)).thenReturn(enrollment);
+    return relationship;
+  }
+
+  private Relationship eventRelationship(UID uid) {
+    RelationshipType relType =
+        createRelTypeConstraint(PROGRAM_STAGE_INSTANCE, PROGRAM_STAGE_INSTANCE);
+    Relationship relationship =
+        Relationship.builder()
+            .relationship(UID.generate())
+            .from(RelationshipItem.builder().event(uid).build())
+            .to(RelationshipItem.builder().event(uid).build())
+            .relationshipType(MetadataIdentifier.ofUid(relType.getUid()))
+            .build();
+    when(preheat.getRelationshipType(relationship.getRelationshipType())).thenReturn(relType);
+    return relationship;
+  }
+
+  private static TrackedEntity trackedEntity(boolean deleted) {
+    TrackedEntity trackedEntity = new TrackedEntity();
+    trackedEntity.setUid(CodeGenerator.generateUid());
+    trackedEntity.setDeleted(deleted);
+    return trackedEntity;
+  }
+
+  private static Enrollment enrollment(boolean deleted, TrackedEntity trackedEntity) {
+    Enrollment enrollment = new Enrollment();
+    enrollment.setUid(CodeGenerator.generateUid());
+    enrollment.setDeleted(deleted);
+    enrollment.setTrackedEntity(trackedEntity);
+    return enrollment;
+  }
+
+  private static TrackerEvent trackerEvent(boolean deleted, Enrollment enrollment) {
+    TrackerEvent event = new TrackerEvent();
+    event.setUid(CodeGenerator.generateUid());
+    event.setDeleted(deleted);
+    event.setEnrollment(enrollment);
+    return event;
   }
 
   private RelationshipType createRelTypeConstraint(RelationshipEntity from, RelationshipEntity to) {

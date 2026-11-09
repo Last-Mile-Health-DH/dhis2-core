@@ -30,6 +30,8 @@
 package org.hisp.dhis.tracker.imports.validation.validator.relationship;
 
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4012;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4021;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E4022;
 import static org.hisp.dhis.tracker.imports.validation.validator.ValidationUtils.enrollmentExist;
 import static org.hisp.dhis.tracker.imports.validation.validator.ValidationUtils.eventExist;
 import static org.hisp.dhis.tracker.imports.validation.validator.ValidationUtils.trackedEntityExists;
@@ -48,7 +50,10 @@ import org.hisp.dhis.tracker.imports.domain.RelationshipItem;
 import org.hisp.dhis.tracker.imports.validation.Reporter;
 import org.hisp.dhis.tracker.imports.validation.ValidationCode;
 import org.hisp.dhis.tracker.imports.validation.Validator;
+import org.hisp.dhis.tracker.model.Enrollment;
+import org.hisp.dhis.tracker.model.SingleEvent;
 import org.hisp.dhis.tracker.model.TrackedEntity;
+import org.hisp.dhis.tracker.model.TrackerEvent;
 
 public class ConstraintValidator implements Validator<Relationship> {
   @Override
@@ -113,6 +118,8 @@ public class ConstraintValidator implements Validator<Relationship> {
       reporter.addError(
           relationship, E4012, TrackerType.TRACKED_ENTITY.getName(), item.getTrackedEntity());
     } else {
+      validateTrackedEntityIsNotDeleted(
+          reporter, relationship, bundle.getPreheat().getTrackedEntity(item.getTrackedEntity()));
       validateTrackedEntityType(item, reporter, relationship, relSide, bundle, constraint);
     }
   }
@@ -133,6 +140,9 @@ public class ConstraintValidator implements Validator<Relationship> {
     } else if (!enrollmentExist(bundle, item.getEnrollment())) {
       reporter.addError(
           relationship, E4012, TrackerType.ENROLLMENT.getName(), item.getEnrollment());
+    } else {
+      validateEnrollmentIsNotDeleted(
+          reporter, relationship, bundle.getPreheat().getEnrollment(item.getEnrollment()));
     }
   }
 
@@ -151,6 +161,78 @@ public class ConstraintValidator implements Validator<Relationship> {
           relationshipItemValueType(item).getName());
     } else if (!eventExist(bundle, item.getEvent())) {
       reporter.addError(relationship, E4012, TrackerType.EVENT.getName(), item.getEvent());
+    } else {
+      validateEventIsNotDeleted(reporter, bundle, relationship, item.getEvent());
+    }
+  }
+
+  /**
+   * Entities that only exist in the payload are not checked here: their own validation rejects them
+   * if they are deleted or belong to a deleted parent.
+   */
+  private static void validateTrackedEntityIsNotDeleted(
+      Reporter reporter, Relationship relationship, TrackedEntity trackedEntity) {
+    if (trackedEntity != null && trackedEntity.isDeleted()) {
+      reporter.addError(
+          relationship, E4021, TrackerType.TRACKED_ENTITY.getName(), trackedEntity.getUid());
+    }
+  }
+
+  private static void validateEnrollmentIsNotDeleted(
+      Reporter reporter, Relationship relationship, Enrollment enrollment) {
+    if (enrollment == null) {
+      return;
+    }
+    if (enrollment.isDeleted()) {
+      reporter.addError(relationship, E4021, TrackerType.ENROLLMENT.getName(), enrollment.getUid());
+    } else if (enrollment.getTrackedEntity() != null && enrollment.getTrackedEntity().isDeleted()) {
+      reporter.addError(
+          relationship,
+          E4022,
+          TrackerType.ENROLLMENT.getName(),
+          enrollment.getUid(),
+          TrackerType.TRACKED_ENTITY.getName(),
+          enrollment.getTrackedEntity().getUid());
+    }
+  }
+
+  private static void validateEventIsNotDeleted(
+      Reporter reporter, TrackerBundle bundle, Relationship relationship, UID uid) {
+    SingleEvent singleEvent = bundle.getPreheat().getSingleEvent(uid);
+    if (singleEvent != null && singleEvent.isDeleted()) {
+      reporter.addError(relationship, E4021, TrackerType.EVENT.getName(), uid);
+      return;
+    }
+
+    TrackerEvent trackerEvent = bundle.getPreheat().getTrackerEvent(uid);
+    if (trackerEvent == null) {
+      return;
+    }
+    if (trackerEvent.isDeleted()) {
+      reporter.addError(relationship, E4021, TrackerType.EVENT.getName(), uid);
+      return;
+    }
+
+    Enrollment enrollment = trackerEvent.getEnrollment();
+    if (enrollment == null) {
+      return;
+    }
+    if (enrollment.isDeleted()) {
+      reporter.addError(
+          relationship,
+          E4022,
+          TrackerType.EVENT.getName(),
+          uid,
+          TrackerType.ENROLLMENT.getName(),
+          enrollment.getUid());
+    } else if (enrollment.getTrackedEntity() != null && enrollment.getTrackedEntity().isDeleted()) {
+      reporter.addError(
+          relationship,
+          E4022,
+          TrackerType.EVENT.getName(),
+          uid,
+          TrackerType.TRACKED_ENTITY.getName(),
+          enrollment.getTrackedEntity().getUid());
     }
   }
 

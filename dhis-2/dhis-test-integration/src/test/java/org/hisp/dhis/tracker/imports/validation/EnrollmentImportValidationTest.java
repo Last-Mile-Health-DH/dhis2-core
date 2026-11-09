@@ -54,6 +54,7 @@ import org.hisp.dhis.tracker.imports.preheat.TrackerPreheat;
 import org.hisp.dhis.tracker.imports.preheat.TrackerPreheatService;
 import org.hisp.dhis.tracker.imports.report.ImportReport;
 import org.hisp.dhis.tracker.imports.report.ValidationReport;
+import org.hisp.dhis.tracker.model.TrackedEntity;
 import org.hisp.dhis.user.User;
 import org.hisp.dhis.util.DateUtils;
 import org.junit.jupiter.api.BeforeAll;
@@ -290,6 +291,29 @@ class EnrollmentImportValidationTest extends PostgresIntegrationTestBase {
 
     assertNoErrors(importReportDelete);
     assertEquals(1, importReportDelete.getStats().getDeleted());
+  }
+
+  @Test
+  void shouldDeleteEnrollmentLeftNotDeletedOfDeletedTrackedEntity() throws IOException {
+    TrackerImportParams params = TrackerImportParams.builder().build();
+    assertNoErrors(
+        trackerImportService.importTracker(
+            params,
+            testSetup.fromJson("tracker/validations/enrollments_te_enrollments-data.json")));
+    // soft delete only the tracked entity, leaving its enrollments not deleted like older versions
+    // allowed
+    manager.delete(manager.get(TrackedEntity.class, "Kj6vYde4LHh"));
+    manager.flush();
+    manager.clear();
+
+    params.setImportStrategy(TrackerImportStrategy.DELETE);
+    ImportReport importReport =
+        trackerImportService.importTracker(
+            params,
+            testSetup.fromJson("tracker/validations/enrollments_te_enrollments-data-delete.json"));
+
+    assertNoErrors(importReport);
+    assertEquals(1, importReport.getStats().getDeleted());
   }
 
   /** Notes with no value are ignored */

@@ -32,12 +32,14 @@ package org.hisp.dhis.tracker.imports.validation.validator.enrollment;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1080;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1081;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1113;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1114;
 
 import org.hisp.dhis.tracker.imports.TrackerImportStrategy;
 import org.hisp.dhis.tracker.imports.bundle.TrackerBundle;
 import org.hisp.dhis.tracker.imports.validation.Reporter;
 import org.hisp.dhis.tracker.imports.validation.Validator;
 import org.hisp.dhis.tracker.model.Enrollment;
+import org.hisp.dhis.tracker.model.TrackedEntity;
 
 /**
  * @author Morten Svanæs <msvanaes@dhis2.org>
@@ -59,8 +61,25 @@ class ExistenceValidator implements Validator<org.hisp.dhis.tracker.imports.doma
 
     if (existingEnrollment != null && importStrategy.isCreate()) {
       reporter.addError(enrollment, E1080, enrollment.getEnrollment());
+      return;
     } else if (existingEnrollment == null && importStrategy.isUpdateOrDelete()) {
       reporter.addError(enrollment, E1081, enrollment.getEnrollment());
+      return;
+    }
+
+    // No create or update is allowed on an enrollment of a soft deleted tracked entity. Deleting is
+    // allowed, so that enrollments left in that state by older versions, which are reported by a
+    // data integrity check, can be cleaned up.
+    if (importStrategy.isDelete()) {
+      return;
+    }
+
+    TrackedEntity trackedEntity =
+        existingEnrollment != null
+            ? existingEnrollment.getTrackedEntity()
+            : bundle.getPreheat().getTrackedEntity(enrollment.getTrackedEntity());
+    if (trackedEntity != null && trackedEntity.isDeleted()) {
+      reporter.addError(enrollment, E1114, trackedEntity.getUid());
     }
   }
 

@@ -185,6 +185,8 @@ public enum ValidationCode {
   E4018("Relationship: `{0}` linking {1}: `{2}` to {3}: `{4}` already exists."),
   E4019("User: `{0}` has no data read access to RelationshipType: `{1}`."),
   E4020("User: `{0}` has no data write access to RelationshipType: `{1}`."),
+  E4021("Relationship cannot link to {0}: `{1}` because it is deleted."),
+  E4022("Relationship cannot link to {0}: `{1}` because its {2}: `{3}` is deleted."),
   E5000("{0} `{1}` cannot be created because {2} `{3}` referenced by it could not be created."),
   E9999("N/A.");
 

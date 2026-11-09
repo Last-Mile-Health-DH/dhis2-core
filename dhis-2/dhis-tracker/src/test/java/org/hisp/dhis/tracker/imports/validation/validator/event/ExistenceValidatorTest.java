@@ -33,6 +33,8 @@ import static org.hisp.dhis.test.utils.Assertions.assertIsEmpty;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1030;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1032;
 import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1082;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1113;
+import static org.hisp.dhis.tracker.imports.validation.ValidationCode.E1114;
 import static org.hisp.dhis.tracker.imports.validation.validator.AssertValidations.assertHasError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -43,10 +45,14 @@ import org.hisp.dhis.tracker.imports.TrackerImportStrategy;
 import org.hisp.dhis.tracker.imports.bundle.TrackerBundle;
 import org.hisp.dhis.tracker.imports.preheat.TrackerPreheat;
 import org.hisp.dhis.tracker.imports.validation.Reporter;
+import org.hisp.dhis.tracker.model.Enrollment;
+import org.hisp.dhis.tracker.model.TrackedEntity;
 import org.hisp.dhis.tracker.model.TrackerEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -157,6 +163,138 @@ class ExistenceValidatorTest {
     validator.validate(reporter, bundle, event);
 
     assertHasError(reporter, event, E1032);
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = TrackerImportStrategy.class,
+      names = {"CREATE", "CREATE_AND_UPDATE"})
+  void shouldFailWhenCreatingEventInDeletedEnrollment(TrackerImportStrategy importStrategy) {
+    UID enrollmentUid = UID.generate();
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder()
+            .event(NOT_PRESENT_EVENT_UID)
+            .enrollment(enrollmentUid)
+            .build();
+    when(preheat.getEnrollment(enrollmentUid))
+        .thenReturn(enrollment(enrollmentUid, true, trackedEntity(true)));
+    when(bundle.getStrategy(event)).thenReturn(importStrategy);
+
+    validator.validate(reporter, bundle, event);
+
+    assertHasError(reporter, event, E1113);
+  }
+
+  @Test
+  void shouldFailWhenCreatingEventInEnrollmentOfDeletedTrackedEntity() {
+    UID enrollmentUid = UID.generate();
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder()
+            .event(NOT_PRESENT_EVENT_UID)
+            .enrollment(enrollmentUid)
+            .build();
+    when(preheat.getEnrollment(enrollmentUid))
+        .thenReturn(enrollment(enrollmentUid, false, trackedEntity(true)));
+    when(bundle.getStrategy(event)).thenReturn(TrackerImportStrategy.CREATE);
+
+    validator.validate(reporter, bundle, event);
+
+    assertHasError(reporter, event, E1114);
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = TrackerImportStrategy.class,
+      names = {"UPDATE", "CREATE_AND_UPDATE"})
+  void shouldFailWhenUpdatingEventInDeletedEnrollment(TrackerImportStrategy importStrategy) {
+    Enrollment enrollment = enrollment(UID.generate(), true, trackedEntity(false));
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder().event(EVENT_UID).build();
+    TrackerEvent existingEvent = getEvent();
+    existingEvent.setEnrollment(enrollment);
+    when(preheat.getTrackerEvent(EVENT_UID)).thenReturn(existingEvent);
+    when(bundle.getStrategy(event)).thenReturn(importStrategy);
+
+    validator.validate(reporter, bundle, event);
+
+    assertHasError(reporter, event, E1113);
+  }
+
+  @Test
+  void shouldFailWhenUpdatingEventInEnrollmentOfDeletedTrackedEntity() {
+    Enrollment enrollment = enrollment(UID.generate(), false, trackedEntity(true));
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder().event(EVENT_UID).build();
+    TrackerEvent existingEvent = getEvent();
+    existingEvent.setEnrollment(enrollment);
+    when(preheat.getTrackerEvent(EVENT_UID)).thenReturn(existingEvent);
+    when(bundle.getStrategy(event)).thenReturn(TrackerImportStrategy.UPDATE);
+
+    validator.validate(reporter, bundle, event);
+
+    assertHasError(reporter, event, E1114);
+  }
+
+  @Test
+  void shouldPassWhenDeletingEventInDeletedEnrollment() {
+    Enrollment enrollment = enrollment(UID.generate(), true, trackedEntity(false));
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder().event(EVENT_UID).build();
+    TrackerEvent existingEvent = getEvent();
+    existingEvent.setEnrollment(enrollment);
+    when(preheat.getTrackerEvent(EVENT_UID)).thenReturn(existingEvent);
+    when(bundle.getStrategy(event)).thenReturn(TrackerImportStrategy.DELETE);
+
+    validator.validate(reporter, bundle, event);
+
+    assertIsEmpty(reporter.getErrors());
+  }
+
+  @Test
+  void shouldPassWhenDeletingEventInEnrollmentOfDeletedTrackedEntity() {
+    Enrollment enrollment = enrollment(UID.generate(), false, trackedEntity(true));
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder().event(EVENT_UID).build();
+    TrackerEvent existingEvent = getEvent();
+    existingEvent.setEnrollment(enrollment);
+    when(preheat.getTrackerEvent(EVENT_UID)).thenReturn(existingEvent);
+    when(bundle.getStrategy(event)).thenReturn(TrackerImportStrategy.DELETE);
+
+    validator.validate(reporter, bundle, event);
+
+    assertIsEmpty(reporter.getErrors());
+  }
+
+  @Test
+  void shouldPassWhenCreatingEventInNotDeletedEnrollment() {
+    UID enrollmentUid = UID.generate();
+    org.hisp.dhis.tracker.imports.domain.Event event =
+        org.hisp.dhis.tracker.imports.domain.TrackerEvent.builder()
+            .event(NOT_PRESENT_EVENT_UID)
+            .enrollment(enrollmentUid)
+            .build();
+    when(preheat.getEnrollment(enrollmentUid))
+        .thenReturn(enrollment(enrollmentUid, false, trackedEntity(false)));
+    when(bundle.getStrategy(event)).thenReturn(TrackerImportStrategy.CREATE);
+
+    validator.validate(reporter, bundle, event);
+
+    assertIsEmpty(reporter.getErrors());
+  }
+
+  private static Enrollment enrollment(UID uid, boolean deleted, TrackedEntity trackedEntity) {
+    Enrollment enrollment = new Enrollment();
+    enrollment.setUid(uid.getValue());
+    enrollment.setDeleted(deleted);
+    enrollment.setTrackedEntity(trackedEntity);
+    return enrollment;
+  }
+
+  private static TrackedEntity trackedEntity(boolean deleted) {
+    TrackedEntity trackedEntity = new TrackedEntity();
+    trackedEntity.setUid(UID.generate().getValue());
+    trackedEntity.setDeleted(deleted);
+    return trackedEntity;
   }
 
   private TrackerEvent getSoftDeletedEvent() {
