@@ -1,0 +1,9 @@
+.git
+.idea
+**/*.iml
+**/target
+**/src/test
+dhis-test-e2e
+dhis-test-performance
+*.sh
+*.md

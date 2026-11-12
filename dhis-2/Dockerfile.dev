@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Builds the DHIS2 web server as a self-contained executable WAR, entirely inside Docker.
+# Used by docker-compose.yml's `web`/`web-sync` services via `docker compose up --build`.
+
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /build
+COPY . .
+# Wagon retry settings match dhis-2/build-dev.sh to tolerate flaky Maven repo mirrors
+ENV MAVEN_OPTS="-Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.class=standard -Dmaven.wagon.http.retryHandler.count=3 -Dmaven.wagon.httpconnectionManager.ttlSeconds=25"
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn --no-transfer-progress --threads 2C clean package \
+      --projects dhis-web-server --also-make -DskipTests -Dmaven.test.skip=true \
+      --activate-profiles embedded
+
+FROM eclipse-temurin:21-jre AS runtime
+WORKDIR /app
+COPY --from=build /build/dhis-web-server/target/dhis.war ./dhis.war
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "dhis.war"]

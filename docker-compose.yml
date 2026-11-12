@@ -3,6 +3,9 @@
 
 x-web-base: &web-base
   image: "${DHIS2_IMAGE:-dhis2/core-dev:local}"
+  build:
+    context: ./dhis-2
+    dockerfile: Dockerfile.dev
   volumes:
     - ./docker/log4j2.xml:/opt/dhis2/log4j2.xml:ro
   environment:
@@ -39,7 +42,7 @@ x-db-base: &db-base
         "CMD-SHELL",
         'psql --no-password --quiet --username $$POSTGRES_USER postgres://127.0.0.1/$$POSTGRES_DB -p 5432 --command "SELECT ''ok''" > /dev/null',
       ]
-    start_period: 120s
+    start_period: 300s # first-run demo DB dump import can take a few minutes
     interval: 1s
     timeout: 3s
     retries: 5
@@ -48,6 +51,22 @@ x-db-base: &db-base
       condition: service_completed_successfully # make sure the DB dump has been downloaded
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80" # required for ACME HTTP challenge when DOMAIN is a public domain
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
   web:
     <<: *web-base
     volumes:
@@ -63,6 +82,9 @@ services:
 
   db:
     <<: *db-base
+    volumes:
+      - db-dump:/docker-entrypoint-initdb.d/
+      - db-data:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5432:5432"
 
@@ -86,18 +108,40 @@ services:
 
   db-sync:
     <<: *db-base
+    volumes:
+      - db-dump:/docker-entrypoint-initdb.d/
+      - db-sync-data:/var/lib/postgresql/data
     profiles: [sync]
     ports:
       - "127.0.0.1:5434:5432"
 
   db-dump:
     image: busybox # busybox wget version does not have --no-clobber, so we need to do the [ -f ] test
-    command: sh -c '[ -f dump.sql.gz ] && echo "dump.sql.gz exists" || wget --output-document dump.sql.gz $$DHIS2_DB_DUMP_URL' # only download file if it does not exist
+    # skip download entirely when LOAD_DEMO_DATA=false, so Postgres starts from an empty database
+    command: sh -c '[ "$$LOAD_DEMO_DATA" = "true" ] || { echo "LOAD_DEMO_DATA is not true, skipping demo DB dump"; exit 0; }; [ -f dump.sql.gz ] && echo "dump.sql.gz exists" || wget --output-document dump.sql.gz $$DHIS2_DB_DUMP_URL'
     environment:
+      LOAD_DEMO_DATA: "${LOAD_DEMO_DATA:-false}"
       DHIS2_DB_DUMP_URL: "${DHIS2_DB_DUMP_URL:-https://databases.dhis2.org/sierra-leone/dev/dhis2-db-sierra-leone.sql.gz}"
     working_dir: /opt/dump
     volumes:
       - db-dump:/opt/dump
 
+  # Applies ADMIN_USERNAME/ADMIN_PASSWORD/ADMIN_EMAIL to the default admin user once DHIS2 is up
+  admin-bootstrap:
+    image: alpine:3.20
+    depends_on:
+      - web
+    environment:
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-district}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@example.com}"
+    volumes:
+      - ./docker/bootstrap-admin.sh:/bootstrap-admin.sh:ro
+    entrypoint: ["sh", "-c", "apk add --no-cache curl jq >/dev/null && sh /bootstrap-admin.sh"]
+
 volumes:
   db-dump: {}
+  db-data: {}
+  db-sync-data: {}
+  caddy-data: {}
+  caddy-config: {}
