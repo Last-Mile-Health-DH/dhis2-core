@@ -44,6 +44,23 @@ A database dump is downloaded automatically the first time you start DHIS2. If y
 docker compose down --volumes
 ```
 
+### HTTPS with Caddy
+
+The stack includes a [Caddy](https://caddyserver.com/) reverse proxy in front of `web`, so DHIS2 is reachable over HTTPS instead of plain `http://localhost:8080`.
+
+* With `DOMAIN` unset or set to `localhost` (the default), DHIS2 is available at `https://localhost/` using a locally-trusted certificate from Caddy's internal CA. Run `docker compose exec caddy caddy trust` once to have your OS/browser trust that CA and avoid certificate warnings.
+* Set `DOMAIN=yourdomain.example` in `.env` to have Caddy request a real Let's Encrypt certificate via ACME instead (requires ports 80/443 reachable from the internet and DNS pointing at the host).
+
+### Starting with an empty database
+
+By default `LOAD_DEMO_DATA=false` in `.env` skips the Sierra Leone demo DB dump entirely, so DHIS2 boots against a completely empty database and creates its own schema on first startup. Set `LOAD_DEMO_DATA=true` to download and import the demo DB dump as before.
+
+### Custom admin credentials
+
+On an empty database, DHIS2 creates a default `admin`/`district` superuser. If `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_EMAIL` are set in `.env`, a one-shot `admin-bootstrap` service waits for DHIS2 to come up and applies them to that user via the REST API, so you don't have to log in with `admin`/`district` first.
+
+DHIS2's password policy requires 8-72 characters with at least one uppercase letter, one digit, and one special character, and rejects passwords containing generic words such as `user`, `admin`, `system`, `password`, or `login`.
+
 ### Pre-built images
 
 We push pre-built DHIS2 Docker images to Dockerhub. You can pick an `<image name>` from one of the following
@@ -130,6 +147,16 @@ docker compose up
 ```
 
 DHIS2 should now be available at `http://localhost:8080`.
+
+#### Building entirely in Docker
+
+If you don't have Maven/JDK set up locally, `dhis-2/Dockerfile.dev` builds DHIS2 inside a Maven container and packages it as an executable WAR, so you don't need anything installed locally besides Docker.
+
+```sh
+docker compose up -d --build
+```
+
+This is a full Maven reactor build, so the first run takes a while; subsequent builds reuse the Maven dependency cache and Docker layer cache.
 
 #### Customizations
 
